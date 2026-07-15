@@ -1,0 +1,556 @@
+<!-- =========================================================================
+  PROTÓTIPO: Mapa de Imóveis — filtros combináveis + cadastro
+  Campos: tipo, preço, quartos, banheiros, vagas, área(m²), status (ativo/
+  inativo), angariação (própria/terceiros + % comissão), localização, fotos.
+  No cadastro, só LOCALIZAÇÃO e UMA FOTO são obrigatórios.
+========================================================================== -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+  :root{
+    --ink:#132A2E; --ink-soft:#2A4A50; --sand:#F5F2EC; --paper:#FFFFFF;
+    --line:#DDD8CE; --gold:#C98A2B; --teal:#2E8B84; --muted:#6B7A78;
+    --red:#B4453A; --shadow:0 6px 24px rgba(19,42,46,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color:var(--ink); background:var(--sand); display:flex; flex-direction:column;
+    height:100vh; overflow:hidden}
+  .topbar{display:flex; align-items:center; gap:14px; padding:14px 22px;
+    background:var(--ink); color:var(--sand); border-bottom:3px solid var(--gold)}
+  .topbar h1{font-family:Georgia,serif; font-size:21px; font-weight:600}
+  .topbar .count{font-size:13px; color:#A9C0BD}
+  .topbar .add{margin-left:auto; background:var(--gold); color:#fff; border:none;
+    padding:9px 16px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer}
+  .topbar .add:hover{filter:brightness(1.08)}
+  .layout{flex:1; display:flex; min-height:0}
+
+  .sidebar{width:370px; flex-shrink:0; background:var(--paper);
+    border-right:1px solid var(--line); display:flex; flex-direction:column}
+
+  /* ---- Filtros ---- */
+  .filtros-head{display:flex; align-items:center; padding:12px 14px; cursor:pointer;
+    border-bottom:1px solid var(--line); user-select:none}
+  .filtros-head h3{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted)}
+  .filtros-head .arrow{margin-left:auto; color:var(--muted); transition:transform .2s}
+  .filtros-head.closed .arrow{transform:rotate(-90deg)}
+  .filtros{padding:14px; border-bottom:1px solid var(--line); max-height:44vh; overflow-y:auto}
+  .filtros.closed{display:none}
+  .grupo{margin-bottom:13px}
+  .grupo > label{display:block; font-size:12px; font-weight:600; margin-bottom:6px; color:var(--ink-soft)}
+  .chips{display:flex; gap:6px}
+  .chip{flex:1; padding:7px 0; text-align:center; font-size:13px; cursor:pointer;
+    border:1px solid var(--line); border-radius:20px; background:#fff; user-select:none}
+  .chip.on{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .row2{display:flex; gap:8px}
+  .row2 > div{flex:1}
+  input,select{width:100%; padding:8px 10px; border:1px solid var(--line);
+    border-radius:8px; font-size:13px; background:#fff; outline:none; font-family:inherit}
+  input:focus,select:focus{border-color:var(--teal)}
+  .btn-area{width:100%; padding:9px; border:1px dashed var(--teal); color:var(--teal);
+    background:#fff; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer}
+  .btn-area.on{background:var(--teal); color:#fff; border-style:solid}
+  .area-ctrl{margin-top:8px; display:none}
+  .area-ctrl.show{display:block}
+  .area-ctrl .raio-val{font-size:12px; color:var(--muted); margin-bottom:4px}
+
+  /* ---- Etiquetas de filtros ativos ---- */
+  .ativos{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line)}
+  .ativos:empty{display:none}
+  .tag{display:inline-flex; align-items:center; gap:5px; background:#EEF5F4; color:var(--ink-soft);
+    font-size:12px; padding:4px 6px 4px 10px; border-radius:16px}
+  .tag button{background:var(--teal); color:#fff; border:none; width:16px; height:16px;
+    border-radius:50%; font-size:11px; line-height:1; cursor:pointer; padding:0}
+  .tag.limpar{background:transparent; color:var(--red); cursor:pointer; padding:4px 8px; font-weight:600}
+
+  /* ---- Lista ---- */
+  .list{overflow-y:auto; flex:1}
+  .vazio{padding:30px 18px; text-align:center; color:var(--muted); font-size:14px}
+  .card{display:flex; gap:12px; padding:12px 14px; cursor:pointer;
+    border-bottom:1px solid var(--line); transition:background .15s; position:relative}
+  .card:hover{background:#FAF8F3}
+  .card.active{background:#EEF5F4; box-shadow:inset 3px 0 0 var(--teal)}
+  .card.inativo{opacity:.55}
+  .card img{width:78px; height:64px; object-fit:cover; border-radius:6px; flex-shrink:0; background:#eee}
+  .card .info{min-width:0}
+  .card .titulo{font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .card .end{font-size:12px; color:var(--muted); margin:2px 0}
+  .card .preco{font-weight:700; font-size:14px}
+  .badge{display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.5px; padding:2px 7px; border-radius:20px; color:#fff; margin-right:4px}
+  .badge.venda{background:var(--gold)} .badge.aluguel{background:var(--teal)}
+  .badge.inativo{background:var(--muted)}
+  .badge.terceiros{background:var(--red)}
+
+  #map{flex:1; background:#cdd6d4}
+  .pin{width:26px; height:26px; border-radius:50% 50% 50% 0; transform:rotate(-45deg);
+    border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,.35)}
+  .pin.venda{background:var(--gold)} .pin.aluguel{background:var(--teal)}
+  .pin.off{background:var(--muted)}
+
+  /* ---- Overlays (galeria + cadastro) ---- */
+  .overlay{position:fixed; inset:0; background:rgba(19,42,46,.55);
+    display:none; align-items:center; justify-content:center; z-index:1000; padding:20px}
+  .overlay.open{display:flex}
+  .sheet{background:var(--paper); border-radius:14px; max-width:560px; width:100%;
+    max-height:92vh; overflow:hidden; box-shadow:var(--shadow); display:flex; flex-direction:column}
+  .gallery{position:relative; background:#111}
+  .gallery img{width:100%; height:300px; object-fit:cover; display:block}
+  .gnav{position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,.45);
+    color:#fff; border:none; cursor:pointer; width:38px; height:38px; border-radius:50%; font-size:20px}
+  .gnav.prev{left:10px} .gnav.next{right:10px}
+  .dots{position:absolute; bottom:10px; left:0; right:0; display:flex; gap:6px; justify-content:center}
+  .dots span{width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.5)}
+  .dots span.on{background:#fff}
+  .sheet .body{padding:20px; overflow-y:auto}
+  .sheet h2{font-family:Georgia,serif; font-size:20px; margin-bottom:4px}
+  .end2{color:var(--muted); font-size:13px; margin-bottom:12px}
+  .preco2{font-size:22px; font-weight:800; margin-bottom:10px}
+  .specs{display:flex; gap:18px; font-size:13px; color:var(--ink-soft);
+    border-top:1px solid var(--line); padding-top:14px; margin-top:6px; flex-wrap:wrap}
+  .specs b{display:block; font-size:16px; color:var(--ink)}
+  .close{position:absolute; top:12px; right:12px; z-index:2; background:rgba(0,0,0,.5);
+    color:#fff; border:none; width:34px; height:34px; border-radius:50%; font-size:18px; cursor:pointer}
+
+  /* ---- Formulário de cadastro ---- */
+  .form-head{padding:18px 20px 0; font-family:Georgia,serif; font-size:20px}
+  .form-body{padding:16px 20px; overflow-y:auto}
+  .form-body .grupo > label .req{color:var(--red)}
+  .fotos-lista{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+  .fotos-lista img{width:56px; height:44px; object-fit:cover; border-radius:5px}
+  .add-foto{display:flex; gap:6px; margin-top:6px}
+  .add-foto button{white-space:nowrap; background:var(--ink-soft); color:#fff; border:none;
+    padding:0 12px; border-radius:8px; cursor:pointer; font-size:13px}
+  .btn-mapa{width:100%; padding:9px; border:1px dashed var(--gold); color:var(--gold);
+    background:#fff; border-radius:8px; font-weight:600; cursor:pointer; font-size:13px}
+  .btn-mapa.ok{border-style:solid; background:#FBF3E4; color:var(--ink)}
+  .form-erro{color:var(--red); font-size:13px; margin:6px 0; min-height:18px}
+  .form-acoes{display:flex; gap:10px; padding:14px 20px; border-top:1px solid var(--line)}
+  .form-acoes button{flex:1; padding:11px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; border:none}
+  .btn-salvar{background:var(--teal); color:#fff}
+  .btn-cancelar{background:#EEE9DF; color:var(--ink)}
+  .dica{font-size:11px; color:var(--muted); margin-top:4px}
+
+  @media(max-width:720px){
+    .layout{flex-direction:column}
+    .sidebar{width:100%; height:50%}
+    #map{height:50%}
+    .filtros{max-height:30vh}
+  }
+</style>
+
+<div class="topbar">
+  <h1>Meus Imóveis</h1>
+  <span class="count" id="count"></span>
+  <button class="add" id="btnCadastrar">+ Cadastrar imóvel</button>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="filtros-head" id="filtrosHead">
+      <h3>Filtros</h3><span class="arrow">▾</span>
+    </div>
+
+    <div class="filtros" id="filtrosBody">
+      <div class="grupo">
+        <label>Tipo</label>
+        <div class="chips" id="chipsTipo">
+          <div class="chip on" data-tipo="Todos">Todos</div>
+          <div class="chip" data-tipo="Venda">Venda</div>
+          <div class="chip" data-tipo="Aluguel">Aluguel</div>
+        </div>
+      </div>
+
+      <div class="grupo">
+        <label>Faixa de preço (R$)</label>
+        <div class="row2">
+          <div><input id="precoMin" type="number" placeholder="Mínimo" /></div>
+          <div><input id="precoMax" type="number" placeholder="Máximo" /></div>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="grupo"><label>Quartos</label>
+          <select id="filQuartos"><option value="0">Qualquer</option><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+        <div class="grupo"><label>Banheiros</label>
+          <select id="filBanheiros"><option value="0">Qualquer</option><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+        <div class="grupo"><label>Vagas</label>
+          <select id="filVagas"><option value="0">Qualquer</option><option>1</option><option>2</option><option>3</option></select></div>
+      </div>
+
+      <div class="row2">
+        <div class="grupo"><label>Situação</label>
+          <select id="filStatus"><option value="Todos">Todas</option><option value="ativo">Ativos</option><option value="inativo">Inativos</option></select></div>
+        <div class="grupo"><label>Angariação</label>
+          <select id="filAngariacao"><option value="Todas">Todas</option><option value="Própria">Própria</option><option value="Terceiros">Terceiros</option></select></div>
+      </div>
+
+      <div class="grupo">
+        <label>Região no mapa</label>
+        <button class="btn-area" id="btnArea">📍 Filtrar por área</button>
+        <div class="area-ctrl" id="areaCtrl">
+          <div class="raio-val" id="raioVal">Raio: 1.5 km</div>
+          <input id="raio" type="range" min="500" max="5000" step="250" value="1500" />
+        </div>
+      </div>
+    </div>
+
+    <div class="ativos" id="ativos"></div>
+    <div class="list" id="list"></div>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<!-- Galeria / detalhe -->
+<div class="overlay" id="detail">
+  <div class="sheet">
+    <div class="gallery">
+      <button class="close" id="close">×</button>
+      <img id="gimg" src="" alt="" />
+      <button class="gnav prev" id="gprev">‹</button>
+      <button class="gnav next" id="gnext">›</button>
+      <div class="dots" id="gdots"></div>
+    </div>
+    <div class="body">
+      <div id="dbadges"></div>
+      <h2 id="dtitulo"></h2>
+      <div class="end2" id="dend"></div>
+      <div class="preco2" id="dpreco"></div>
+      <div class="specs" id="dspecs"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Cadastro -->
+<div class="overlay" id="cadastro">
+  <div class="sheet">
+    <div class="form-head">Cadastrar imóvel</div>
+    <div class="form-body">
+      <div class="grupo"><label>Localização <span class="req">*</span></label>
+        <button class="btn-mapa" id="btnLocal">📍 Marcar no mapa</button>
+        <div class="dica">Clique no botão e depois no ponto do mapa onde fica o imóvel.</div>
+      </div>
+      <div class="grupo"><label>Fotos <span class="req">*</span> (link da imagem)</label>
+        <div class="add-foto">
+          <input id="fotoUrl" type="text" placeholder="https://..." />
+          <button id="addFoto">Adicionar</button>
+        </div>
+        <div class="fotos-lista" id="fotosLista"></div>
+        <div class="dica">Num app real, aqui seria upload de arquivo (Supabase/Cloudinary).</div>
+      </div>
+      <div class="grupo"><label>Título</label><input id="fTitulo" placeholder="Ex.: Apartamento Zona 7" /></div>
+      <div class="row2">
+        <div class="grupo"><label>Tipo</label>
+          <select id="fTipo"><option>Venda</option><option>Aluguel</option></select></div>
+        <div class="grupo"><label>Preço (R$)</label><input id="fPreco" type="number" placeholder="0" /></div>
+      </div>
+      <div class="grupo"><label>Endereço</label><input id="fEndereco" placeholder="Rua, bairro, cidade" /></div>
+      <div class="row2">
+        <div class="grupo"><label>Quartos</label><input id="fQuartos" type="number" value="0" /></div>
+        <div class="grupo"><label>Banheiros</label><input id="fBanheiros" type="number" value="0" /></div>
+        <div class="grupo"><label>Vagas</label><input id="fVagas" type="number" value="0" /></div>
+        <div class="grupo"><label>Área (m²)</label><input id="fArea" type="number" value="0" /></div>
+      </div>
+      <div class="row2">
+        <div class="grupo"><label>Situação</label>
+          <select id="fStatus"><option value="true">Ativo</option><option value="false">Inativo</option></select></div>
+        <div class="grupo"><label>Angariação</label>
+          <select id="fAngariacao"><option>Própria</option><option>Terceiros</option></select></div>
+      </div>
+      <div class="grupo" id="grupoComissao"><label>% de comissão (angariação de terceiros)</label>
+        <input id="fComissao" type="number" placeholder="Ex.: 30" /></div>
+      <div class="form-erro" id="formErro"></div>
+    </div>
+    <div class="form-acoes">
+      <button class="btn-cancelar" id="cancelarCad">Cancelar</button>
+      <button class="btn-salvar" id="salvarCad">Salvar imóvel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =======================================================================
+   1) DADOS
+======================================================================= */
+let IMOVEIS = [
+  { id:1, titulo:"Apartamento Zona 7", tipo:"Venda", preco:480000, ativo:true,
+    angariacao:"Própria", comissao:null, endereco:"Av. Mandacaru, Maringá-PR",
+    quartos:3, banheiros:2, vagas:1, area:92, lat:-23.4089, lng:-51.9331,
+    fotos:["https://picsum.photos/seed/imovel1a/700/450","https://picsum.photos/seed/imovel1b/700/450"] },
+  { id:2, titulo:"Casa Jardim Alvorada", tipo:"Venda", preco:720000, ativo:true,
+    angariacao:"Terceiros", comissao:30, endereco:"R. Pioneiro, Maringá-PR",
+    quartos:4, banheiros:3, vagas:2, area:210, lat:-23.4402, lng:-51.9585,
+    fotos:["https://picsum.photos/seed/imovel2a/700/450","https://picsum.photos/seed/imovel2b/700/450"] },
+  { id:3, titulo:"Kitnet Centro", tipo:"Aluguel", preco:1200, ativo:false,
+    angariacao:"Própria", comissao:null, endereco:"Av. Brasil, Maringá-PR",
+    quartos:1, banheiros:1, vagas:0, area:38, lat:-23.4253, lng:-51.9386,
+    fotos:["https://picsum.photos/seed/imovel3a/700/450","https://picsum.photos/seed/imovel3b/700/450"] },
+  { id:4, titulo:"Sobrado Zona 5", tipo:"Venda", preco:890000, ativo:true,
+    angariacao:"Própria", comissao:null, endereco:"R. Néo Alves, Maringá-PR",
+    quartos:4, banheiros:4, vagas:3, area:245, lat:-23.4171, lng:-51.9520,
+    fotos:["https://picsum.photos/seed/imovel4a/700/450","https://picsum.photos/seed/imovel4b/700/450"] },
+  { id:5, titulo:"Apartamento Novo Centro", tipo:"Aluguel", preco:2400, ativo:true,
+    angariacao:"Terceiros", comissao:25, endereco:"Av. São Paulo, Maringá-PR",
+    quartos:2, banheiros:2, vagas:1, area:68, lat:-23.4291, lng:-51.9302,
+    fotos:["https://picsum.photos/seed/imovel5a/700/450","https://picsum.photos/seed/imovel5b/700/450"] },
+  { id:6, titulo:"Terreno Zona 8", tipo:"Venda", preco:350000, ativo:false,
+    angariacao:"Própria", comissao:null, endereco:"R. das Palmeiras, Maringá-PR",
+    quartos:0, banheiros:0, vagas:0, area:420, lat:-23.4478, lng:-51.9251,
+    fotos:["https://picsum.photos/seed/imovel6a/700/450","https://picsum.photos/seed/imovel6b/700/450"] },
+];
+let proximoId = 7;
+const fmtPreco = im => "R$ " + Number(im.preco||0).toLocaleString('pt-BR') + (im.tipo==="Aluguel" ? "/mês" : "");
+
+/* =======================================================================
+   2) MAPA
+======================================================================= */
+const map = L.map('map').setView([-23.4253, -51.9386], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'© OpenStreetMap', maxZoom:19}).addTo(map);
+
+const markers = {};
+function criarMarcador(im){
+  const cls = !im.ativo ? 'off' : im.tipo.toLowerCase();
+  const icon = L.divIcon({className:'', html:`<div class="pin ${cls}"></div>`,
+    iconSize:[26,26], iconAnchor:[13,26]});
+  const m = L.marker([im.lat, im.lng], {icon}).bindPopup(`<b>${im.titulo||'(sem título)'}</b><br>${fmtPreco(im)}`);
+  m.on('click', () => selecionar(im.id));
+  markers[im.id] = m;
+}
+IMOVEIS.forEach(criarMarcador);
+
+/* =======================================================================
+   3) FILTROS
+======================================================================= */
+const filtro = { tipo:"Todos", precoMin:null, precoMax:null, quartos:0, banheiros:0,
+                 vagas:0, status:"Todos", angariacao:"Todas", areaCenter:null, areaRaio:1500 };
+let circulo = null;
+let pickMode = null;        // 'area' | 'cadastro' | null
+
+function passa(im){
+  if (filtro.tipo!=="Todos" && im.tipo!==filtro.tipo) return false;
+  if (filtro.precoMin!=null && im.preco<filtro.precoMin) return false;
+  if (filtro.precoMax!=null && im.preco>filtro.precoMax) return false;
+  if (im.quartos < filtro.quartos) return false;
+  if (im.banheiros < filtro.banheiros) return false;
+  if (im.vagas < filtro.vagas) return false;
+  if (filtro.status==="ativo" && !im.ativo) return false;
+  if (filtro.status==="inativo" && im.ativo) return false;
+  if (filtro.angariacao!=="Todas" && im.angariacao!==filtro.angariacao) return false;
+  if (filtro.areaCenter && map.distance(filtro.areaCenter,[im.lat,im.lng]) > filtro.areaRaio) return false;
+  return true;
+}
+function aplicar(){
+  const visiveis = IMOVEIS.filter(passa);
+  IMOVEIS.forEach(im => {
+    const noMapa = map.hasLayer(markers[im.id]);
+    const mostra = visiveis.includes(im);
+    if (mostra && !noMapa) markers[im.id].addTo(map);
+    if (!mostra && noMapa) map.removeLayer(markers[im.id]);
+  });
+  renderLista(visiveis);
+  renderAtivos();
+}
+
+/* ---- Etiquetas de filtros ativos (removíveis) ---- */
+function renderAtivos(){
+  const el = document.getElementById('ativos');
+  const tags = [];
+  const add = (key,txt) => tags.push(`<span class="tag">${txt}<button data-clear="${key}">×</button></span>`);
+  if (filtro.tipo!=="Todos") add('tipo', 'Tipo: '+filtro.tipo);
+  if (filtro.precoMin!=null) add('precoMin', 'Mín: R$ '+filtro.precoMin.toLocaleString('pt-BR'));
+  if (filtro.precoMax!=null) add('precoMax', 'Máx: R$ '+filtro.precoMax.toLocaleString('pt-BR'));
+  if (filtro.quartos>0) add('quartos', filtro.quartos+'+ quartos');
+  if (filtro.banheiros>0) add('banheiros', filtro.banheiros+'+ banheiros');
+  if (filtro.vagas>0) add('vagas', filtro.vagas+'+ vagas');
+  if (filtro.status!=="Todos") add('status', filtro.status==="ativo"?"Ativos":"Inativos");
+  if (filtro.angariacao!=="Todas") add('angariacao', 'Angariação: '+filtro.angariacao);
+  if (filtro.areaCenter) add('area', 'Área: '+(filtro.areaRaio/1000).toFixed(1)+' km');
+  el.innerHTML = tags.length ? tags.join('') + '<span class="tag limpar" data-clear="tudo">limpar tudo</span>' : '';
+  el.querySelectorAll('[data-clear]').forEach(b =>
+    b.addEventListener('click', () => limparFiltro(b.dataset.clear)));
+}
+function limparFiltro(key){
+  const set = (id,val) => { const e=document.getElementById(id); if(e) e.value=val; };
+  if (key==="tudo"){
+    filtro.tipo="Todos"; filtro.precoMin=filtro.precoMax=null; filtro.quartos=filtro.banheiros=filtro.vagas=0;
+    filtro.status="Todos"; filtro.angariacao="Todas"; limparFiltro('area');
+    document.querySelectorAll('#chipsTipo .chip').forEach(c=>c.classList.toggle('on',c.dataset.tipo==="Todos"));
+    set('precoMin',''); set('precoMax',''); set('filQuartos','0'); set('filBanheiros','0');
+    set('filVagas','0'); set('filStatus','Todos'); set('filAngariacao','Todas');
+  } else if (key==="tipo"){ filtro.tipo="Todos";
+    document.querySelectorAll('#chipsTipo .chip').forEach(c=>c.classList.toggle('on',c.dataset.tipo==="Todos")); }
+  else if (key==="precoMin"){ filtro.precoMin=null; set('precoMin',''); }
+  else if (key==="precoMax"){ filtro.precoMax=null; set('precoMax',''); }
+  else if (key==="quartos"){ filtro.quartos=0; set('filQuartos','0'); }
+  else if (key==="banheiros"){ filtro.banheiros=0; set('filBanheiros','0'); }
+  else if (key==="vagas"){ filtro.vagas=0; set('filVagas','0'); }
+  else if (key==="status"){ filtro.status="Todos"; set('filStatus','Todos'); }
+  else if (key==="angariacao"){ filtro.angariacao="Todas"; set('filAngariacao','Todas'); }
+  else if (key==="area"){ filtro.areaCenter=null; if(circulo){map.removeLayer(circulo);circulo=null;}
+    document.getElementById('areaCtrl').classList.remove('show'); }
+  aplicar();
+}
+
+/* =======================================================================
+   4) LISTA
+======================================================================= */
+const listEl = document.getElementById('list');
+const countEl = document.getElementById('count');
+function renderLista(itens){
+  countEl.textContent = itens.length + " imóveis";
+  if (!itens.length){ listEl.innerHTML='<div class="vazio">Nenhum imóvel com esses filtros.</div>'; return; }
+  listEl.innerHTML = itens.map(im => `
+    <div class="card ${im.ativo?'':'inativo'}" data-id="${im.id}">
+      <img src="${im.fotos[0]}" alt="">
+      <div class="info">
+        <span class="badge ${im.tipo.toLowerCase()}">${im.tipo}</span>
+        ${im.ativo?'':'<span class="badge inativo">Inativo</span>'}
+        ${im.angariacao==="Terceiros"?'<span class="badge terceiros">3º</span>':''}
+        <div class="titulo">${im.titulo||'(sem título)'}</div>
+        <div class="end">${im.endereco||'Sem endereço'}</div>
+        <div class="preco">${fmtPreco(im)}</div>
+      </div>
+    </div>`).join('');
+  listEl.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => selecionar(+c.dataset.id)));
+}
+
+/* ---- Controles ---- */
+document.getElementById('filtrosHead').addEventListener('click', () => {
+  document.getElementById('filtrosHead').classList.toggle('closed');
+  document.getElementById('filtrosBody').classList.toggle('closed');
+});
+document.querySelectorAll('#chipsTipo .chip').forEach(chip => chip.addEventListener('click', () => {
+  document.querySelectorAll('#chipsTipo .chip').forEach(c=>c.classList.remove('on'));
+  chip.classList.add('on'); filtro.tipo=chip.dataset.tipo; aplicar();
+}));
+document.getElementById('precoMin').addEventListener('input', e=>{ filtro.precoMin=e.target.value?+e.target.value:null; aplicar(); });
+document.getElementById('precoMax').addEventListener('input', e=>{ filtro.precoMax=e.target.value?+e.target.value:null; aplicar(); });
+document.getElementById('filQuartos').addEventListener('change', e=>{ filtro.quartos=+e.target.value; aplicar(); });
+document.getElementById('filBanheiros').addEventListener('change', e=>{ filtro.banheiros=+e.target.value; aplicar(); });
+document.getElementById('filVagas').addEventListener('change', e=>{ filtro.vagas=+e.target.value; aplicar(); });
+document.getElementById('filStatus').addEventListener('change', e=>{ filtro.status=e.target.value; aplicar(); });
+document.getElementById('filAngariacao').addEventListener('change', e=>{ filtro.angariacao=e.target.value; aplicar(); });
+
+/* ---- Área no mapa ---- */
+const btnArea=document.getElementById('btnArea'), areaCtrl=document.getElementById('areaCtrl');
+const raio=document.getElementById('raio'), raioVal=document.getElementById('raioVal');
+btnArea.addEventListener('click', () => {
+  pickMode = pickMode==='area' ? null : 'area';
+  btnArea.classList.toggle('on', pickMode==='area');
+  btnArea.textContent = pickMode==='area' ? "Clique no mapa..." : "📍 Filtrar por área";
+  map.getContainer().style.cursor = pickMode ? "crosshair" : "";
+});
+raio.addEventListener('input', e => {
+  filtro.areaRaio=+e.target.value;
+  raioVal.textContent="Raio: "+(filtro.areaRaio/1000).toFixed(1)+" km";
+  if(circulo) circulo.setRadius(filtro.areaRaio); aplicar();
+});
+
+/* ---- Clique no mapa (serve p/ área E p/ cadastro) ---- */
+map.on('click', e => {
+  if (pickMode==='area'){
+    filtro.areaCenter=e.latlng;
+    if(circulo) map.removeLayer(circulo);
+    circulo=L.circle(e.latlng,{radius:filtro.areaRaio,color:'#2E8B84',fillColor:'#2E8B84',fillOpacity:.12}).addTo(map);
+    pickMode=null; btnArea.classList.remove('on'); btnArea.textContent="📍 Filtrar por área";
+    map.getContainer().style.cursor=""; areaCtrl.classList.add('show'); aplicar();
+  } else if (pickMode==='cadastro'){
+    novoLocal=e.latlng; pickMode=null; map.getContainer().style.cursor="";
+    const b=document.getElementById('btnLocal'); b.classList.add('ok');
+    b.textContent="✓ Local definido — clique p/ trocar";
+    document.getElementById('cadastro').classList.add('open');
+  }
+});
+
+/* =======================================================================
+   5) SELECIONAR + GALERIA
+======================================================================= */
+function selecionar(id){
+  const im=IMOVEIS.find(x=>x.id===id);
+  map.flyTo([im.lat,im.lng],15,{duration:.6});
+  if(map.hasLayer(markers[id])) markers[id].openPopup();
+  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('active',+c.dataset.id===id));
+  abrirGaleria(im);
+}
+let fotoAtual=0, fotosAtuais=[];
+const detail=document.getElementById('detail'), gimg=document.getElementById('gimg'), gdots=document.getElementById('gdots');
+function abrirGaleria(im){
+  fotosAtuais=im.fotos; fotoAtual=0;
+  document.getElementById('dtitulo').textContent=im.titulo||'(sem título)';
+  document.getElementById('dend').textContent=im.endereco||'Sem endereço';
+  document.getElementById('dpreco').textContent=fmtPreco(im);
+  document.getElementById('dbadges').innerHTML =
+    `<span class="badge ${im.tipo.toLowerCase()}">${im.tipo}</span>`+
+    (im.ativo?'':'<span class="badge inativo">Inativo</span>')+
+    (im.angariacao==="Terceiros"?'<span class="badge terceiros">Angariação de terceiros</span>':'');
+  const comissao = (im.angariacao==="Terceiros" && im.comissao) ? `<div><b>${im.comissao}%</b>comissão</div>` : '';
+  document.getElementById('dspecs').innerHTML =
+    `<div><b>${im.quartos}</b>quartos</div><div><b>${im.banheiros}</b>banheiros</div>`+
+    `<div><b>${im.vagas}</b>vagas</div><div><b>${im.area}</b>m²</div>`+
+    `<div><b>${im.angariacao}</b>angariação</div>`+comissao;
+  mostrarFoto(); detail.classList.add('open');
+}
+function mostrarFoto(){
+  gimg.src=fotosAtuais[fotoAtual];
+  gdots.innerHTML=fotosAtuais.map((_,i)=>`<span class="${i===fotoAtual?'on':''}"></span>`).join('');
+}
+document.getElementById('gnext').onclick=()=>{fotoAtual=(fotoAtual+1)%fotosAtuais.length;mostrarFoto();};
+document.getElementById('gprev').onclick=()=>{fotoAtual=(fotoAtual-1+fotosAtuais.length)%fotosAtuais.length;mostrarFoto();};
+document.getElementById('close').onclick=()=>detail.classList.remove('open');
+detail.addEventListener('click',e=>{if(e.target===detail)detail.classList.remove('open');});
+
+/* =======================================================================
+   6) CADASTRO
+======================================================================= */
+const cadastro=document.getElementById('cadastro');
+let novoLocal=null, novasFotos=[];
+function abrirCadastro(){
+  novoLocal=null; novasFotos=[];
+  document.getElementById('fotosLista').innerHTML='';
+  document.getElementById('formErro').textContent='';
+  const b=document.getElementById('btnLocal'); b.classList.remove('ok'); b.textContent="📍 Marcar no mapa";
+  ['fTitulo','fPreco','fEndereco','fComissao','fotoUrl'].forEach(id=>document.getElementById(id).value='');
+  ['fQuartos','fBanheiros','fVagas','fArea'].forEach(id=>document.getElementById(id).value='0');
+  document.getElementById('fTipo').value='Venda'; document.getElementById('fStatus').value='true';
+  document.getElementById('fAngariacao').value='Própria';
+  cadastro.classList.add('open');
+}
+document.getElementById('btnCadastrar').addEventListener('click', abrirCadastro);
+document.getElementById('cancelarCad').addEventListener('click', ()=>cadastro.classList.remove('open'));
+
+document.getElementById('btnLocal').addEventListener('click', ()=>{
+  pickMode='cadastro'; map.getContainer().style.cursor="crosshair";
+  cadastro.classList.remove('open');   // esconde p/ clicar no mapa
+});
+document.getElementById('addFoto').addEventListener('click', ()=>{
+  const url=document.getElementById('fotoUrl').value.trim();
+  if(!url) return;
+  novasFotos.push(url); document.getElementById('fotoUrl').value='';
+  document.getElementById('fotosLista').innerHTML=novasFotos.map(u=>`<img src="${u}">`).join('');
+});
+document.getElementById('salvarCad').addEventListener('click', ()=>{
+  const erro=document.getElementById('formErro');
+  if(!novoLocal){ erro.textContent="Marque a localização no mapa."; return; }
+  if(!novasFotos.length){ erro.textContent="Adicione pelo menos uma foto."; return; }
+  const g=id=>document.getElementById(id).value;
+  const novo={
+    id:proximoId++, titulo:g('fTitulo')||'(sem título)', tipo:g('fTipo'),
+    preco:+g('fPreco')||0, ativo:g('fStatus')==='true', angariacao:g('fAngariacao'),
+    comissao:g('fComissao')?+g('fComissao'):null, endereco:g('fEndereco')||'',
+    quartos:+g('fQuartos')||0, banheiros:+g('fBanheiros')||0, vagas:+g('fVagas')||0,
+    area:+g('fArea')||0, lat:novoLocal.lat, lng:novoLocal.lng, fotos:[...novasFotos]
+  };
+  IMOVEIS.push(novo); criarMarcador(novo);
+  cadastro.classList.remove('open'); aplicar(); selecionar(novo.id);
+});
+
+/* =======================================================================
+   7) START
+======================================================================= */
+aplicar();
+</script>
