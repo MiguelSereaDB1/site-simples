@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Backend uploaded images
+backend/storage/images/*
+!backend/storage/images/.gitkeep
